@@ -89,6 +89,7 @@ if(WIN32)
     target_compile_definitions(PXREARobotSDK PUBLIC
         WINDOWS_x86
     )
+    target_link_libraries(PXREARobotSDK PUBLIC Ws2_32)
 
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_link_directories(PXREARobotSDK PUBLIC ${PROJECT_SOURCE_DIR}/../GrpcSDK/lib/debug)

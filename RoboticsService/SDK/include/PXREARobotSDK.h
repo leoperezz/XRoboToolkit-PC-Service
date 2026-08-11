@@ -4,6 +4,7 @@
  */
 #ifndef PXREACLIENTSDK_H
 #define PXREACLIENTSDK_H
+#include <stdint.h>
 #ifdef _WIN32
 #if defined(PXREACLIENTSDK_LIBRARY)
 #  define PXREACLIENTSDK_EXPORT __declspec(dllexport)
@@ -40,6 +41,10 @@ enum PXREAClientCallbackType
     PXREADeviceStateJson        = 1<<25,
     /// @brief Custom message
     PXREADeviceCustomMessage    = 1<<26,
+    /// @brief Front camera encoded frame (independent camera socket)
+    PXREADeviceCameraFrame      = 1<<27,
+    /// @brief PICO microphone PCM chunk (independent audio socket)
+    PXREADeviceAudioFrame       = 1<<28,
     /// @brief Mask for enabling all callbacks
     PXREAFullMask               = 0xffffffff
 };
@@ -68,6 +73,30 @@ typedef struct {
     /// @brief Data pointer, valid within callback
     const char* dataPtr;
 }PXREADevCustomMessage;
+
+/// @brief One H.264 access unit from the headset front camera.
+/// @note dataPtr is valid only for the duration of the callback.
+typedef struct {
+    uint32_t width;
+    uint32_t height;
+    uint64_t receiveTimestampNs;
+    uint64_t sequence;
+    uint64_t dataSize;
+    const char* dataPtr;
+    char codec[8];
+}PXREACameraFrame;
+
+/// @brief One PCM audio chunk from the headset microphone.
+/// @note dataPtr is valid only for the duration of the callback.
+typedef struct {
+    uint32_t sampleRate;
+    uint16_t channels;
+    uint64_t captureTimestampNs;
+    uint64_t sequence;
+    uint64_t dataSize;
+    const char* dataPtr;
+    char format[16];
+}PXREAAudioFrame;
 
 
 

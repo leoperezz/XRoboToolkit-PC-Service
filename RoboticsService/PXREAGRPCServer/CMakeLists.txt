@@ -15,8 +15,8 @@ endif()
 
 set(CMAKE_CXX_STANDARD 17)
 
-find_package(Qt6 REQUIRED COMPONENTS Core5Compat)
-find_package(QT NAMES Qt5 Qt6 REQUIRED COMPONENTS Core)
+find_package(Qt6 REQUIRED COMPONENTS Core5Compat Network)
+find_package(QT NAMES Qt5 Qt6 REQUIRED COMPONENTS Core Network)
 
 if(WIN32)
     qt_add_library(PXREAGRPCServer SHARED
@@ -26,6 +26,10 @@ if(WIN32)
         ../PXREAService/PXREAService.pb.h
         FeedbackController.h
         FeedbackController.cpp
+        CameraStreamServer.h
+        CameraStreamServer.cpp
+        AudioStreamServer.h
+        AudioStreamServer.cpp
         PXREAGRPCServer.h
         PXREAGRPCServer.cpp
 
@@ -42,6 +46,10 @@ if(UNIX)
             ../PXREAService/linux_aarch64/PXREAService.pb.h
             FeedbackController.h
             FeedbackController.cpp
+            CameraStreamServer.h
+            CameraStreamServer.cpp
+            AudioStreamServer.h
+            AudioStreamServer.cpp
             PXREAGRPCServer.h
             PXREAGRPCServer.cpp
         )
@@ -53,6 +61,10 @@ if(UNIX)
             ../PXREAService/linux_x86/PXREAService.pb.h
             FeedbackController.h
             FeedbackController.cpp
+            CameraStreamServer.h
+            CameraStreamServer.cpp
+            AudioStreamServer.h
+            AudioStreamServer.cpp
             PXREAGRPCServer.h
             PXREAGRPCServer.cpp
         )
@@ -68,6 +80,7 @@ target_link_libraries(PXREAGRPCServer PRIVATE Qt6::Core5Compat)
 
 target_link_libraries(PXREAGRPCServer PUBLIC
     Qt::Core
+    Qt::Network
 )
 
 target_include_directories(PXREAGRPCServer PUBLIC
@@ -438,5 +451,3 @@ if(UNIX)
     )
 
 endif()
-
-

@@ -3,6 +3,10 @@
 #include <memory>
 #include <sstream>
 #include <fstream>
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#endif
 #include <grpcpp/grpcpp.h>
 #include <PXREAService.pb.h>
 #include <PXREAService.grpc.pb.h>
@@ -11,6 +15,9 @@
 #include "nlohmann/json.hpp"
 #include <string>
 #include <unordered_map>
+#include <atomic>
+#include <vector>
+#include <cstring>
 #ifdef _WIN32
 #include <Windows.h>
 static void OutputDebug(const char* str)
@@ -30,6 +37,10 @@ static unsigned GetCurrentPid()
 #include <stdio.h>
 #include <stdlib.h>
 #include <thread>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 
 #define strcpy_s(dest, destsz, src) strncpy(dest, src, destsz)
@@ -67,6 +78,50 @@ pfPXREAClientCallback gOnPXREAClientCallback;
 //client sdk implement
 
 using PXREAService::EAService;
+
+template <class T>
+T PXREAGetSDKClientConfig(const char* section, const char* key, const T& defaultValue);
+
+namespace {
+#ifdef _WIN32
+using CameraSocket = SOCKET;
+constexpr CameraSocket kInvalidCameraSocket = INVALID_SOCKET;
+void closeCameraSocket(CameraSocket s) { if (s != INVALID_SOCKET) closesocket(s); }
+#else
+using CameraSocket = int;
+constexpr CameraSocket kInvalidCameraSocket = -1;
+void closeCameraSocket(CameraSocket s) { if (s >= 0) close(s); }
+#endif
+
+uint16_t readU16BE(const unsigned char *p)
+{
+    return static_cast<uint16_t>((p[0] << 8) | p[1]);
+}
+uint32_t readU32BE(const unsigned char *p)
+{
+    return (static_cast<uint32_t>(p[0]) << 24) | (static_cast<uint32_t>(p[1]) << 16) |
+           (static_cast<uint32_t>(p[2]) << 8) | p[3];
+}
+uint64_t readU64BE(const unsigned char *p)
+{
+    return (static_cast<uint64_t>(readU32BE(p)) << 32) | readU32BE(p + 4);
+}
+
+bool receiveExact(CameraSocket socket, char *data, size_t size, const std::atomic_bool &running)
+{
+    size_t received = 0;
+    while (received < size && running) {
+#ifdef _WIN32
+        const int count = recv(socket, data + received, static_cast<int>(size - received), 0);
+#else
+        const ssize_t count = recv(socket, data + received, size - received, 0);
+#endif
+        if (count <= 0) return false;
+        received += static_cast<size_t>(count);
+    }
+    return received == size;
+}
+}
 
 class PXREAClient
 {
@@ -227,6 +282,8 @@ public:
     void StartServiceCheck()
     {
         m_bChecking = true;
+        StartCameraReceiver();
+        StartAudioReceiver();
         m_checkThread = std::thread([this]{
             bool connect = false;
             while(m_bChecking)
@@ -271,17 +328,169 @@ public:
     }
     void StopServiceCheck(){
         m_bChecking = false;
+        StopAudioReceiver();
+        StopCameraReceiver();
     }
     void WaitServiceCheckExit(){
         m_checkThread.join();
     }
 private:
+    void StartCameraReceiver()
+    {
+        m_cameraRunning = true;
+        m_cameraThread = std::thread([this] {
+            const std::string host = PXREAGetSDKClientConfig("Camera", "connectAddr", std::string("127.0.0.1"));
+            const std::string port = PXREAGetSDKClientConfig("Camera", "connectPort", std::string("60062"));
+            while (m_cameraRunning) {
+                addrinfo hints{};
+                hints.ai_family = AF_UNSPEC;
+                hints.ai_socktype = SOCK_STREAM;
+                addrinfo *addresses = nullptr;
+                if (getaddrinfo(host.c_str(), port.c_str(), &hints, &addresses) != 0) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                    continue;
+                }
+                CameraSocket connected = kInvalidCameraSocket;
+                for (addrinfo *it = addresses; it && m_cameraRunning; it = it->ai_next) {
+                    CameraSocket candidate = socket(it->ai_family, it->ai_socktype, it->ai_protocol);
+                    if (candidate == kInvalidCameraSocket) continue;
+                    if (connect(candidate, it->ai_addr, static_cast<int>(it->ai_addrlen)) == 0) {
+                        connected = candidate;
+                        break;
+                    }
+                    closeCameraSocket(candidate);
+                }
+                freeaddrinfo(addresses);
+                if (connected == kInvalidCameraSocket) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                    continue;
+                }
+                m_cameraSocket = connected;
+                unsigned char header[36];
+                while (m_cameraRunning && receiveExact(connected, reinterpret_cast<char *>(header), sizeof(header), m_cameraRunning)) {
+                    if (std::memcmp(header, "XRCF", 4) != 0 || readU16BE(header + 4) != 1) break;
+                    const uint16_t codec = readU16BE(header + 6);
+                    const uint32_t payloadSize = readU32BE(header + 32);
+                    if (codec != 1 || payloadSize == 0 || payloadSize > 8u * 1024u * 1024u) break;
+                    std::vector<char> payload(payloadSize);
+                    if (!receiveExact(connected, payload.data(), payload.size(), m_cameraRunning)) break;
+                    if ((g_mask & PXREADeviceCameraFrame) && gOnPXREAClientCallback) {
+                        PXREACameraFrame frame{};
+                        frame.width = readU32BE(header + 8);
+                        frame.height = readU32BE(header + 12);
+                        frame.receiveTimestampNs = readU64BE(header + 16);
+                        frame.sequence = readU64BE(header + 24);
+                        frame.dataSize = payload.size();
+                        frame.dataPtr = payload.data();
+                        std::strncpy(frame.codec, "h264", sizeof(frame.codec) - 1);
+                        gOnPXREAClientCallback(g_context, PXREADeviceCameraFrame, 0, &frame);
+                    }
+                }
+                m_cameraSocket = kInvalidCameraSocket;
+                closeCameraSocket(connected);
+                if (m_cameraRunning) std::this_thread::sleep_for(std::chrono::milliseconds(250));
+            }
+        });
+    }
+
+    void StopCameraReceiver()
+    {
+        m_cameraRunning = false;
+        CameraSocket socket = m_cameraSocket.exchange(kInvalidCameraSocket);
+        if (socket != kInvalidCameraSocket) {
+#ifdef _WIN32
+            shutdown(socket, SD_BOTH);
+#else
+            shutdown(socket, SHUT_RDWR);
+#endif
+        }
+        if (m_cameraThread.joinable()) m_cameraThread.join();
+    }
+
+    void StartAudioReceiver()
+    {
+        m_audioRunning = true;
+        m_audioThread = std::thread([this] {
+            const std::string host = PXREAGetSDKClientConfig("Audio", "connectAddr", std::string("127.0.0.1"));
+            const std::string port = PXREAGetSDKClientConfig("Audio", "connectPort", std::string("60063"));
+            while (m_audioRunning) {
+                addrinfo hints{};
+                hints.ai_family = AF_UNSPEC;
+                hints.ai_socktype = SOCK_STREAM;
+                addrinfo *addresses = nullptr;
+                if (getaddrinfo(host.c_str(), port.c_str(), &hints, &addresses) != 0) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                    continue;
+                }
+                CameraSocket connected = kInvalidCameraSocket;
+                for (addrinfo *it = addresses; it && m_audioRunning; it = it->ai_next) {
+                    CameraSocket candidate = socket(it->ai_family, it->ai_socktype, it->ai_protocol);
+                    if (candidate == kInvalidCameraSocket) continue;
+                    if (connect(candidate, it->ai_addr, static_cast<int>(it->ai_addrlen)) == 0) {
+                        connected = candidate;
+                        break;
+                    }
+                    closeCameraSocket(candidate);
+                }
+                freeaddrinfo(addresses);
+                if (connected == kInvalidCameraSocket) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                    continue;
+                }
+                m_audioSocket = connected;
+                unsigned char header[36];
+                while (m_audioRunning && receiveExact(connected, reinterpret_cast<char *>(header), sizeof(header), m_audioRunning)) {
+                    if (std::memcmp(header, "XRAU", 4) != 0 || readU16BE(header + 4) != 1) break;
+                    const uint16_t format = readU16BE(header + 6);
+                    const uint32_t payloadSize = readU32BE(header + 32);
+                    if (format != 1 || payloadSize == 0 || payloadSize > 256u * 1024u) break;
+                    std::vector<char> payload(payloadSize);
+                    if (!receiveExact(connected, payload.data(), payload.size(), m_audioRunning)) break;
+                    if ((g_mask & PXREADeviceAudioFrame) && gOnPXREAClientCallback) {
+                        PXREAAudioFrame frame{};
+                        frame.sampleRate = readU32BE(header + 8);
+                        frame.channels = readU16BE(header + 12);
+                        frame.captureTimestampNs = readU64BE(header + 16);
+                        frame.sequence = readU64BE(header + 24);
+                        frame.dataSize = payload.size();
+                        frame.dataPtr = payload.data();
+                        std::strncpy(frame.format, "pcm_s16le", sizeof(frame.format) - 1);
+                        gOnPXREAClientCallback(g_context, PXREADeviceAudioFrame, 0, &frame);
+                    }
+                }
+                m_audioSocket = kInvalidCameraSocket;
+                closeCameraSocket(connected);
+                if (m_audioRunning) std::this_thread::sleep_for(std::chrono::milliseconds(250));
+            }
+        });
+    }
+
+    void StopAudioReceiver()
+    {
+        m_audioRunning = false;
+        CameraSocket socket = m_audioSocket.exchange(kInvalidCameraSocket);
+        if (socket != kInvalidCameraSocket) {
+#ifdef _WIN32
+            shutdown(socket, SD_BOTH);
+#else
+            shutdown(socket, SHUT_RDWR);
+#endif
+        }
+        if (m_audioThread.joinable()) m_audioThread.join();
+    }
+
     grpc::ClientContext* m_feedbackCtx{nullptr};
     std::thread m_feedbackThread;
     std::unique_ptr<EAService::Stub> m_stub;
     bool m_bChecking;
     std::thread m_checkThread;
     std::mutex m_mtx;
+    std::atomic_bool m_cameraRunning{false};
+    std::atomic<CameraSocket> m_cameraSocket{kInvalidCameraSocket};
+    std::thread m_cameraThread;
+    std::atomic_bool m_audioRunning{false};
+    std::atomic<CameraSocket> m_audioSocket{kInvalidCameraSocket};
+    std::thread m_audioThread;
 };
 
 std::shared_ptr<PXREAClient> g_pClient;
@@ -297,6 +506,10 @@ T PXREAGetSDKClientConfig(const char* section, const char* key, const T& default
 }
 int PXREAInit(void* context,pfPXREAClientCallback cliCallback,unsigned mask)
 {
+#ifdef _WIN32
+    WSADATA wsaData{};
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) return -1;
+#endif
     OutputDebug("initialize sdk,connect");
     std::string addr = PXREAGetSDKClientConfig("Client","connectAddr",std::string("127.0.0.1"));
     std::string port = PXREAGetSDKClientConfig("Client","connectPort",std::string("60061"));
@@ -318,6 +531,9 @@ int PXREADeinit()
     g_pClient->StopWatchFeedback();
     g_pClient->WaitWatchFeedbackExit();
     g_pClient.reset();
+#ifdef _WIN32
+    WSACleanup();
+#endif
     OutputDebug("uninitialize sdk");
     return 0;
 }
