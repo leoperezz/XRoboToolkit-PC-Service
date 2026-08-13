@@ -26,8 +26,6 @@ if(WIN32)
         ../PXREAService/PXREAService.pb.h
         FeedbackController.h
         FeedbackController.cpp
-        CameraStreamServer.h
-        CameraStreamServer.cpp
         AudioStreamServer.h
         AudioStreamServer.cpp
         PXREAGRPCServer.h
@@ -46,8 +44,6 @@ if(UNIX)
             ../PXREAService/linux_aarch64/PXREAService.pb.h
             FeedbackController.h
             FeedbackController.cpp
-            CameraStreamServer.h
-            CameraStreamServer.cpp
             AudioStreamServer.h
             AudioStreamServer.cpp
             PXREAGRPCServer.h
@@ -61,8 +57,6 @@ if(UNIX)
             ../PXREAService/linux_x86/PXREAService.pb.h
             FeedbackController.h
             FeedbackController.cpp
-            CameraStreamServer.h
-            CameraStreamServer.cpp
             AudioStreamServer.h
             AudioStreamServer.cpp
             PXREAGRPCServer.h

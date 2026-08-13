@@ -607,25 +607,6 @@ inline void OnPXREAClientCallback(void* context,PXREAClientCallbackType type,int
     }
 
 ```
-# PICO front-camera channel
-
-Front-camera video is intentionally transported outside the tracking socket and
-outside the gRPC feedback stream. `RoboticsServiceProcess` listens for the PICO
-H.264 stream on TCP `63902` and relays framed packets to local SDK clients on
-`127.0.0.1:60062`. Both ports can be overridden in `setting.ini`:
-
-```ini
-[Camera]
-devicePort=63902
-sdkPort=60062
-```
-
-The SDK exposes frames through the `PXREADeviceCameraFrame` callback. The frame
-timestamp is the PC receive time (Unix nanoseconds), because the existing PICO
-`CameraHandle` wire format contains H.264 bytes but no capture timestamp.
-Slow SDK clients are skipped once their camera socket buffer is full, so camera
-backpressure never enters the controller/head/hand path.
-
 # PICO microphone channel
 
 Microphone capture has its own PCM transport: the headset connects to TCP
@@ -641,4 +622,4 @@ sdkPort=60063
 The wire format is signed PCM16 little-endian, normally 48 kHz, in 20 ms
 chunks. `PXREADeviceAudioFrame` supplies the original capture timestamp,
 sequence, sample rate, and channel count. Audio backpressure is bounded and
-does not enter the camera, tracking, or gRPC feedback paths.
+does not enter the tracking or gRPC feedback paths.

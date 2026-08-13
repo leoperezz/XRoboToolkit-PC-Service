@@ -84,13 +84,13 @@ T PXREAGetSDKClientConfig(const char* section, const char* key, const T& default
 
 namespace {
 #ifdef _WIN32
-using CameraSocket = SOCKET;
-constexpr CameraSocket kInvalidCameraSocket = INVALID_SOCKET;
-void closeCameraSocket(CameraSocket s) { if (s != INVALID_SOCKET) closesocket(s); }
+using AudioSocket = SOCKET;
+constexpr AudioSocket kInvalidAudioSocket = INVALID_SOCKET;
+void closeAudioSocket(AudioSocket s) { if (s != INVALID_SOCKET) closesocket(s); }
 #else
-using CameraSocket = int;
-constexpr CameraSocket kInvalidCameraSocket = -1;
-void closeCameraSocket(CameraSocket s) { if (s >= 0) close(s); }
+using AudioSocket = int;
+constexpr AudioSocket kInvalidAudioSocket = -1;
+void closeAudioSocket(AudioSocket s) { if (s >= 0) close(s); }
 #endif
 
 uint16_t readU16BE(const unsigned char *p)
@@ -107,7 +107,7 @@ uint64_t readU64BE(const unsigned char *p)
     return (static_cast<uint64_t>(readU32BE(p)) << 32) | readU32BE(p + 4);
 }
 
-bool receiveExact(CameraSocket socket, char *data, size_t size, const std::atomic_bool &running)
+bool receiveExact(AudioSocket socket, char *data, size_t size, const std::atomic_bool &running)
 {
     size_t received = 0;
     while (received < size && running) {
@@ -282,7 +282,6 @@ public:
     void StartServiceCheck()
     {
         m_bChecking = true;
-        StartCameraReceiver();
         StartAudioReceiver();
         m_checkThread = std::thread([this]{
             bool connect = false;
@@ -329,84 +328,11 @@ public:
     void StopServiceCheck(){
         m_bChecking = false;
         StopAudioReceiver();
-        StopCameraReceiver();
     }
     void WaitServiceCheckExit(){
         m_checkThread.join();
     }
 private:
-    void StartCameraReceiver()
-    {
-        m_cameraRunning = true;
-        m_cameraThread = std::thread([this] {
-            const std::string host = PXREAGetSDKClientConfig("Camera", "connectAddr", std::string("127.0.0.1"));
-            const std::string port = PXREAGetSDKClientConfig("Camera", "connectPort", std::string("60062"));
-            while (m_cameraRunning) {
-                addrinfo hints{};
-                hints.ai_family = AF_UNSPEC;
-                hints.ai_socktype = SOCK_STREAM;
-                addrinfo *addresses = nullptr;
-                if (getaddrinfo(host.c_str(), port.c_str(), &hints, &addresses) != 0) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
-                    continue;
-                }
-                CameraSocket connected = kInvalidCameraSocket;
-                for (addrinfo *it = addresses; it && m_cameraRunning; it = it->ai_next) {
-                    CameraSocket candidate = socket(it->ai_family, it->ai_socktype, it->ai_protocol);
-                    if (candidate == kInvalidCameraSocket) continue;
-                    if (connect(candidate, it->ai_addr, static_cast<int>(it->ai_addrlen)) == 0) {
-                        connected = candidate;
-                        break;
-                    }
-                    closeCameraSocket(candidate);
-                }
-                freeaddrinfo(addresses);
-                if (connected == kInvalidCameraSocket) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
-                    continue;
-                }
-                m_cameraSocket = connected;
-                unsigned char header[36];
-                while (m_cameraRunning && receiveExact(connected, reinterpret_cast<char *>(header), sizeof(header), m_cameraRunning)) {
-                    if (std::memcmp(header, "XRCF", 4) != 0 || readU16BE(header + 4) != 1) break;
-                    const uint16_t codec = readU16BE(header + 6);
-                    const uint32_t payloadSize = readU32BE(header + 32);
-                    if (codec != 1 || payloadSize == 0 || payloadSize > 8u * 1024u * 1024u) break;
-                    std::vector<char> payload(payloadSize);
-                    if (!receiveExact(connected, payload.data(), payload.size(), m_cameraRunning)) break;
-                    if ((g_mask & PXREADeviceCameraFrame) && gOnPXREAClientCallback) {
-                        PXREACameraFrame frame{};
-                        frame.width = readU32BE(header + 8);
-                        frame.height = readU32BE(header + 12);
-                        frame.receiveTimestampNs = readU64BE(header + 16);
-                        frame.sequence = readU64BE(header + 24);
-                        frame.dataSize = payload.size();
-                        frame.dataPtr = payload.data();
-                        std::strncpy(frame.codec, "h264", sizeof(frame.codec) - 1);
-                        gOnPXREAClientCallback(g_context, PXREADeviceCameraFrame, 0, &frame);
-                    }
-                }
-                m_cameraSocket = kInvalidCameraSocket;
-                closeCameraSocket(connected);
-                if (m_cameraRunning) std::this_thread::sleep_for(std::chrono::milliseconds(250));
-            }
-        });
-    }
-
-    void StopCameraReceiver()
-    {
-        m_cameraRunning = false;
-        CameraSocket socket = m_cameraSocket.exchange(kInvalidCameraSocket);
-        if (socket != kInvalidCameraSocket) {
-#ifdef _WIN32
-            shutdown(socket, SD_BOTH);
-#else
-            shutdown(socket, SHUT_RDWR);
-#endif
-        }
-        if (m_cameraThread.joinable()) m_cameraThread.join();
-    }
-
     void StartAudioReceiver()
     {
         m_audioRunning = true;
@@ -422,18 +348,18 @@ private:
                     std::this_thread::sleep_for(std::chrono::milliseconds(500));
                     continue;
                 }
-                CameraSocket connected = kInvalidCameraSocket;
+                AudioSocket connected = kInvalidAudioSocket;
                 for (addrinfo *it = addresses; it && m_audioRunning; it = it->ai_next) {
-                    CameraSocket candidate = socket(it->ai_family, it->ai_socktype, it->ai_protocol);
-                    if (candidate == kInvalidCameraSocket) continue;
+                    AudioSocket candidate = socket(it->ai_family, it->ai_socktype, it->ai_protocol);
+                    if (candidate == kInvalidAudioSocket) continue;
                     if (connect(candidate, it->ai_addr, static_cast<int>(it->ai_addrlen)) == 0) {
                         connected = candidate;
                         break;
                     }
-                    closeCameraSocket(candidate);
+                    closeAudioSocket(candidate);
                 }
                 freeaddrinfo(addresses);
-                if (connected == kInvalidCameraSocket) {
+                if (connected == kInvalidAudioSocket) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(500));
                     continue;
                 }
@@ -458,8 +384,8 @@ private:
                         gOnPXREAClientCallback(g_context, PXREADeviceAudioFrame, 0, &frame);
                     }
                 }
-                m_audioSocket = kInvalidCameraSocket;
-                closeCameraSocket(connected);
+                m_audioSocket = kInvalidAudioSocket;
+                closeAudioSocket(connected);
                 if (m_audioRunning) std::this_thread::sleep_for(std::chrono::milliseconds(250));
             }
         });
@@ -468,8 +394,8 @@ private:
     void StopAudioReceiver()
     {
         m_audioRunning = false;
-        CameraSocket socket = m_audioSocket.exchange(kInvalidCameraSocket);
-        if (socket != kInvalidCameraSocket) {
+        AudioSocket socket = m_audioSocket.exchange(kInvalidAudioSocket);
+        if (socket != kInvalidAudioSocket) {
 #ifdef _WIN32
             shutdown(socket, SD_BOTH);
 #else
@@ -485,11 +411,8 @@ private:
     bool m_bChecking;
     std::thread m_checkThread;
     std::mutex m_mtx;
-    std::atomic_bool m_cameraRunning{false};
-    std::atomic<CameraSocket> m_cameraSocket{kInvalidCameraSocket};
-    std::thread m_cameraThread;
     std::atomic_bool m_audioRunning{false};
-    std::atomic<CameraSocket> m_audioSocket{kInvalidCameraSocket};
+    std::atomic<AudioSocket> m_audioSocket{kInvalidAudioSocket};
     std::thread m_audioThread;
 };
 

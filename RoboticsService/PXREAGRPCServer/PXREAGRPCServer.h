@@ -18,7 +18,6 @@
 #include "PXREAService.grpc.pb.h"
 #include "PXREAService.pb.h"
 #include "FeedbackController.h"
-#include "CameraStreamServer.h"
 #include "AudioStreamServer.h"
 
 class PXREASERVERSDK_EXPORT PXREAServerAPI: public QObject,public PXREAService::EAService::Service
@@ -66,7 +65,6 @@ private:
     DeviceManagement* m_devMng;
     QSet<QString> m_screenMonitorDevices;
     QSet<QString> m_streamMonitorDevices;
-    CameraStreamServer m_cameraStreamServer;
     AudioStreamServer m_audioStreamServer;
 
 };

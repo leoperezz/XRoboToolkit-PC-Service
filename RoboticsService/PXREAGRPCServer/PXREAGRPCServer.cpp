@@ -12,9 +12,6 @@ void PXREAServerAPI::init(quint64 devMng, bool login, bool runAsService)
     qDebug() <<"create grpc server:"<<listenStr;
     m_addrPort = listenStr.toUtf8().constData();
     m_devMng = (DeviceManagement*)devMng;
-    const quint16 cameraDevicePort = settings.value("Camera/devicePort", 63902).toUInt();
-    const quint16 cameraSdkPort = settings.value("Camera/sdkPort", 60062).toUInt();
-    m_cameraStreamServer.start(cameraDevicePort, cameraSdkPort);
     const quint16 audioDevicePort = settings.value("Audio/devicePort", 63903).toUInt();
     const quint16 audioSdkPort = settings.value("Audio/sdkPort", 60063).toUInt();
     m_audioStreamServer.start(audioDevicePort, audioSdkPort);
@@ -27,7 +24,6 @@ void PXREAServerAPI::init(quint64 devMng, bool login, bool runAsService)
 
 void PXREAServerAPI::deinit()
 {
-    m_cameraStreamServer.stop();
     m_audioStreamServer.stop();
     stopService();
     qDebug() <<"stop grpc server";
