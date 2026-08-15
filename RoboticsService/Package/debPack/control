@@ -1,5 +1,5 @@
 Package: roboticsservice
-Version: 1.0.0.0
+Version: 1.0.1.0
 Architecture: amd64
 Maintainer: roboticsservice.support@bytedance.com
 Depends:

@@ -10,13 +10,13 @@ echo "set qt gcc compile env parameter..."
 ################################################################################
 ################################################################################
 # Set the path to your Qt installation for GCC 64-bit architecture
-QT_GCC_64=/home/pico/Qt6/6.6.3/gcc_64/
-export QT6_TOOLS=/home/pico/Qt6/Tools
+QT_GCC_64=/home/leonardo/Qt/6.6.3/gcc_64/
+export QT6_TOOLS=/home/leonardo/Qt/Tools
 
-export PATH=/home/pico/Qt6/6.6.3/gcc_64/bin:$PATH
-export PATH=/home/pico/Qt6/6.6.3/gcc_64/include:$PATH
-export PATH=/home/pico/Qt6/Tools/QtCreator/bin:$PATH
-export PATH=/home/pico/Qt6/Tools/CMake/bin:$PATH
+export PATH=/home/leonardo/Qt/6.6.3/gcc_64/bin:$PATH
+export PATH=/home/leonardo/Qt/6.6.3/gcc_64/include:$PATH
+export PATH=/home/leonardo/Qt/Tools/QtCreator/bin:$PATH
+export PATH=/home/leonardo/Qt/Tools/CMake/bin:$PATH
 #################################################################################
 ################################################################################
 
