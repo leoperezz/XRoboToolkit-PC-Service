@@ -217,6 +217,30 @@ The project provides packaging scripts for different platforms to generate distr
     - `runRobotDataRecorder.sh` - Launches data recorder
     - `runService.sh` - Launches service process only
 
+##### Build and publish from this fork with Git
+
+From the repository root, compile the service and create the versioned package with one command:
+
+```bash
+./build-deb.sh
+```
+
+The script reads the package version from `RoboticsService/Package/debPack/control` and places the result under `releases/download/v<VERSION>/`. This directory is intentionally tracked so the package can be published with a normal commit and push:
+
+```bash
+git add build-deb.sh README.md releases/download/
+git commit -m "Build Debian package"
+git push origin main
+```
+
+For example, a package built on Ubuntu 22.04 can then be downloaded from this fork without using `gh` or a GitHub Release:
+
+```bash
+wget https://raw.githubusercontent.com/leoperezz/XRoboToolkit-PC-Service/main/releases/download/v1.0.1.0/XRoboToolkit_PC_Service_1.0.1.0_ubuntu_22.04_amd64.deb
+```
+
+The operating-system label is detected automatically. It can be overridden when building, for example with `DISTRO_LABEL=ubuntu_24.04 ./build-deb.sh` when the package is built for Ubuntu 24.04.
+
 #### Linux ARM64 Platform Packaging
 - `RoboticsService\Package\debPackAArch64\setup.sh`
   - Creates Debian package (.deb) for Linux ARM64 platform
